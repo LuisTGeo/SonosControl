@@ -41,9 +41,10 @@ Requires macOS 14+ and the Xcode command-line tools.
 open build/SonosControl.app
 ```
 
-A speaker icon (with a " Sonos" label) appears in the menu bar; click it to
-toggle the panel. The panel also opens on launch and from anywhere with **⌘⌥S**,
-so you can reach it even if the menu-bar icon is hidden behind the notch.
+A speaker icon appears in the menu bar; click it to open the anchored panel,
+matching the companion WindowList app. The panel closes when you click away and
+can also be toggled from anywhere with **⌘⌥S**, so you can reach it even if the
+menu-bar icon is hidden behind the notch.
 
 ## Permissions
 

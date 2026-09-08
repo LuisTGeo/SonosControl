@@ -7,29 +7,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller = SonosController()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private var window: NSWindow!
     private var hotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setUpStatusItem()
         setUpPopover()
-        setUpWindow()
         setUpHotKey()
-        // Warm discovery in the background so the list is ready on first click,
-        // and open the panel so a direct launch has visible feedback.
+        // Warm discovery in the background so the list is ready on first click.
         controller.refresh()
-        DispatchQueue.main.async { [weak self] in
-            self?.showWindow()
-        }
     }
 
     // MARK: - Setup
 
     private func setUpStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: 52)
+        // Match WindowList: compact icon-only item, with the popover anchored
+        // directly below it in the menu bar.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = nil
-            button.title = "Sonos"
+            button.image = NSImage(
+                systemSymbolName: "hifispeaker.2.fill",
+                accessibilityDescription: "Sonos"
+            )
             button.action = #selector(togglePopover)
             button.target = self
         }
@@ -47,23 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.popover = popover
     }
 
-    private func setUpWindow() {
-        let content = NSHostingController(
-            rootView: ContentView().environmentObject(controller)
-        )
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 560),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "SonosControl"
-        window.contentViewController = content
-        window.isReleasedWhenClosed = false
-        window.center()
-        self.window = window
-    }
-
     private func setUpHotKey() {
         // ⌘⌥S toggles the panel from anywhere.
         hotKey = HotKey(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | optionKey)) { [weak self] in
@@ -74,28 +55,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Popover control
 
     @objc private func togglePopover() {
-        if window.isVisible {
-            window.orderOut(nil)
-            controller.endLiveUpdates()
+        if popover.isShown {
+            popover.performClose(nil)
         } else {
-            showWindow()
+            showPopover()
         }
     }
 
     private func showPopover() {
         guard let button = statusItem.button else { return }
+        controller.refresh()
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         // Make the popover window key so it takes focus immediately (matters when
         // opened via the global hotkey while another app is frontmost).
         popover.contentViewController?.view.window?.makeKey()
-    }
-
-    private func showWindow() {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        controller.beginLiveUpdates()
     }
 }
 
