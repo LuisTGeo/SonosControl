@@ -1,0 +1,10 @@
+# Generated macOS app bundle
+build/
+
+# macOS metadata
+.DS_Store
+
+# Local editor and Swift tooling files
+.vscode/
+.idea/
+DerivedData/
