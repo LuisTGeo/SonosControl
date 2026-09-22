@@ -125,11 +125,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private func nowPlayingRow(_ group: SonosGroup) -> some View {
-        if let np = group.nowPlaying, np.hasTrack {
-            VStack(spacing: 8) {
-                HStack(spacing: 10) {
-                    artwork(np.artworkURL)
-                    VStack(alignment: .leading, spacing: 2) {
+        let np = group.nowPlaying
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                artwork(np.flatMap { $0.hasTrack ? $0.artworkURL : nil })
+                VStack(alignment: .leading, spacing: 2) {
+                    if let np, np.hasTrack {
                         Text(np.title).font(.callout).fontWeight(.semibold).lineLimit(1)
                         if !np.artist.isEmpty {
                             Text(np.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -137,13 +138,17 @@ struct ContentView: View {
                         if !np.album.isEmpty {
                             Text(np.album).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
+                    } else {
+                        Text("Nothing playing").font(.callout).fontWeight(.semibold).lineLimit(1)
+                        Text("Choose something in the Sonos app")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Spacer(minLength: 0)
                 }
-                transportRow(group, np)
+                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
+            transportRow(group, np)
         }
+        .padding(.vertical, 4)
     }
 
     private func artwork(_ url: URL?) -> some View {
@@ -163,7 +168,7 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private func transportRow(_ group: SonosGroup, _ np: NowPlaying) -> some View {
+    private func transportRow(_ group: SonosGroup, _ np: NowPlaying?) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 28) {
                 Button(action: { controller.previous(groupId: group.id) }) {
@@ -181,7 +186,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
 
-            if np.duration > 0 {
+            if let np, np.duration > 0 {
                 HStack(spacing: 6) {
                     Text(timeLabel(np.position)).font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                     Slider(value: seekBinding(group: group, np: np), in: 0...Double(np.duration)) { editing in
@@ -202,6 +207,8 @@ struct ContentView: View {
             ) { editing in
                 if !editing { commit(id: "group-\(group.id)") { controller.setGroupVolume(groupId: group.id, to: $0) } }
             }
+            .accessibilityLabel("\(group.name) group volume")
+            .accessibilityValue("\(group.averageVolume) percent")
             Text("Group").font(.caption2).foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
         }
     }
@@ -215,6 +222,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help(zone.muted ? "Unmute" : "Mute")
+            .accessibilityLabel(zone.muted ? "Unmute \(zone.name)" : "Mute \(zone.name)")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(zone.name).font(.callout)
@@ -224,6 +232,8 @@ struct ContentView: View {
                 ) { editing in
                     if !editing { commit(id: zone.id) { controller.setVolume(zoneId: zone.id, to: $0) } }
                 }
+                .accessibilityLabel("\(zone.name) volume")
+                .accessibilityValue("\(zone.volume) percent")
             }
 
             groupMenu(for: zone)
@@ -250,6 +260,7 @@ struct ContentView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Grouping")
+        .accessibilityLabel("Group options for \(zone.name)")
     }
 
     // MARK: - Footer
