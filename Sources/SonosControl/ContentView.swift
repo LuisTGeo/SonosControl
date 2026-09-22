@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 /// The control panel: one section per Sonos group, with play/pause, a group
 /// volume slider, and per-room volume + mute + grouping controls.
@@ -11,6 +12,8 @@ struct ContentView: View {
 
     /// Manual IP entry used as a fallback when discovery is blocked.
     @State private var manualIP: String = ""
+    @State private var launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+    @State private var loginItemError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +22,14 @@ struct ContentView: View {
             content
             Divider()
             footer
+        }
+        .alert("Couldn't update login setting", isPresented: Binding(
+            get: { loginItemError != nil },
+            set: { if !$0 { loginItemError = nil } }
+        )) {
+            Button("OK", role: .cancel) { loginItemError = nil }
+        } message: {
+            Text(loginItemError ?? "Please try again in System Settings.")
         }
         // Must match the popover's contentSize exactly, or the content renders
         // offset inside the popover (a gap appears above/below).
@@ -279,6 +290,18 @@ struct ContentView: View {
             .disabled(controller.groups.isEmpty || controller.isLoading)
             .help("Ungroup all rooms")
 
+            Menu {
+                Toggle("Start at Login", isOn: Binding(
+                    get: { launchAtLoginEnabled },
+                    set: { setLaunchAtLogin($0) }
+                ))
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Settings")
+
             Spacer()
 
             Button(action: { NSApp.terminate(nil) }) {
@@ -329,5 +352,18 @@ struct ContentView: View {
         guard !ip.isEmpty else { return }
         controller.addManualIP(ip)
         manualIP = ""
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginEnabled = enabled
+        } catch {
+            loginItemError = error.localizedDescription
+        }
     }
 }

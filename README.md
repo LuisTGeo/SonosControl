@@ -68,7 +68,8 @@ grant once.
   won't flood the speaker while dragging), and a **⋯ menu** to *Join* another
   group or *Ungroup* this room.
 - **Footer** — **Party** groups every room into one; **Split** ungroups them all;
-  **⟳** (top-right) rescans; the power button quits.
+  **⟳** (top-right) rescans; the **⚙︎** menu can enable **Start at Login**; the
+  power button quits.
 
 ## Architecture
 
