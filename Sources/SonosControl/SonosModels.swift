@@ -55,6 +55,28 @@ struct SonosGroup: Identifiable {
     }
 }
 
+struct SonosFavorite: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let uri: String
+    let metadata: String
+}
+
+struct SavedSetup: Identifiable, Codable {
+    struct Room: Codable {
+        var id: String
+        var volume: Int
+    }
+    struct Group: Codable {
+        var coordinatorID: String
+        var rooms: [Room]
+    }
+
+    var id: UUID = UUID()
+    var name: String
+    var groups: [Group]
+}
+
 /// SOAP service coordinates for the endpoints we talk to (all on port 1400).
 enum SonosService {
     static let rendering = (path: "/MediaRenderer/RenderingControl/Control",
@@ -65,4 +87,6 @@ enum SonosService {
                               type: "urn:schemas-upnp-org:service:AVTransport:1")
     static let topology = (path: "/ZoneGroupTopology/Control",
                            type: "urn:schemas-upnp-org:service:ZoneGroupTopology:1")
+    static let contentDirectory = (path: "/MediaServer/ContentDirectory/Control",
+                                   type: "urn:schemas-upnp-org:service:ContentDirectory:1")
 }

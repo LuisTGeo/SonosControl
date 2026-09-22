@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var manualIP: String = ""
     @State private var launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
+    @State private var showingSavePreset = false
+    @State private var presetName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +33,17 @@ struct ContentView: View {
         } message: {
             Text(loginItemError ?? "Please try again in System Settings.")
         }
+        .alert("Save room preset", isPresented: $showingSavePreset) {
+            TextField("Preset name", text: $presetName)
+            Button("Save") {
+                let name = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty { controller.saveSetup(named: name) }
+                presetName = ""
+            }
+            Button("Cancel", role: .cancel) { presetName = "" }
+        } message: {
+            Text("Save the current room groups and volume levels.")
+        }
         // Must match the popover's contentSize exactly, or the content renders
         // offset inside the popover (a gap appears above/below).
         .frame(width: 360, height: 560)
@@ -46,6 +59,25 @@ struct ContentView: View {
                 ProgressView().controlSize(.small).padding(.leading, 2)
             }
             Spacer()
+            Menu {
+                if controller.favorites.isEmpty {
+                    Text("No Sonos Favorites found")
+                } else {
+                    ForEach(controller.favorites) { favorite in
+                        Menu(favorite.title) {
+                            ForEach(controller.groups) { group in
+                                Button(group.name) { controller.playFavorite(favorite, in: group.id) }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "star.fill")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Play a Sonos Favorite")
+            .disabled(controller.groups.isEmpty)
             Button(action: { controller.refresh() }) {
                 Image(systemName: "arrow.clockwise")
             }
@@ -126,6 +158,29 @@ struct ContentView: View {
 
             Text(group.name).fontWeight(.semibold)
             Spacer()
+            Menu {
+                ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
+                    Button("Stop in \(minutes) minutes") {
+                        controller.setSleepTimer(groupId: group.id, minutes: minutes)
+                    }
+                }
+                Button("Cancel sleep timer") { controller.setSleepTimer(groupId: group.id, minutes: nil) }
+            } label: {
+                Image(systemName: "moon.zzz")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Sleep timer for \(group.name)")
+            Menu {
+                ForEach([10, 25, 50, 75], id: \.self) { value in
+                    Button("Set volume to \(value)%") { controller.setGroupVolume(groupId: group.id, to: value) }
+                }
+            } label: {
+                Image(systemName: "speaker.wave.2")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Quick group volume")
             if group.members.count > 1 {
                 Image(systemName: "link").font(.caption2).foregroundStyle(.secondary)
             }
@@ -253,6 +308,33 @@ struct ContentView: View {
 
     private func groupMenu(for zone: SonosZone) -> some View {
         Menu {
+            Menu("Set volume") {
+                ForEach([10, 25, 50, 75], id: \.self) { value in
+                    Button("\(value)%") { controller.setVolume(zoneId: zone.id, to: value) }
+                }
+            }
+            Menu("Sound") {
+                Menu("Bass") {
+                    ForEach([-3, 0, 3], id: \.self) { value in
+                        Button(value == 0 ? "Flat" : "\(value > 0 ? "+" : "")\(value)") {
+                            controller.setBass(zoneId: zone.id, to: value)
+                        }
+                    }
+                }
+                Menu("Treble") {
+                    ForEach([-3, 0, 3], id: \.self) { value in
+                        Button(value == 0 ? "Flat" : "\(value > 0 ? "+" : "")\(value)") {
+                            controller.setTreble(zoneId: zone.id, to: value)
+                        }
+                    }
+                }
+                Button("Loudness on") { controller.setLoudness(zoneId: zone.id, enabled: true) }
+                Button("Loudness off") { controller.setLoudness(zoneId: zone.id, enabled: false) }
+                Divider()
+                Button("Night Sound on") { controller.setNightMode(zoneId: zone.id, enabled: true) }
+                Button("Night Sound off") { controller.setNightMode(zoneId: zone.id, enabled: false) }
+            }
+            Divider()
             let others = controller.groups.filter { $0.id != zone.coordinatorId }
             if !others.isEmpty {
                 Section("Join group") {
@@ -291,6 +373,20 @@ struct ContentView: View {
             .help("Ungroup all rooms")
 
             Menu {
+                Button("Save current rooms…") { showingSavePreset = true }
+                if !controller.savedSetups.isEmpty {
+                    Menu("Restore room preset") {
+                        ForEach(controller.savedSetups) { setup in
+                            Button(setup.name) { controller.applySetup(setup) }
+                        }
+                    }
+                    Menu("Delete room preset") {
+                        ForEach(controller.savedSetups) { setup in
+                            Button(setup.name, role: .destructive) { controller.deleteSetup(setup.id) }
+                        }
+                    }
+                }
+                Divider()
                 Toggle("Start at Login", isOn: Binding(
                     get: { launchAtLoginEnabled },
                     set: { setLaunchAtLogin($0) }

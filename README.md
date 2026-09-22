@@ -65,11 +65,17 @@ grant once.
 - **Per group** — a header with **play/pause**, the group name ("Living Room +2"
   when grouped), and a **Group** volume slider for multi-room groups.
 - **Per room** — a **mute** toggle, a **volume** slider (sends on release, so it
-  won't flood the speaker while dragging), and a **⋯ menu** to *Join* another
-  group or *Ungroup* this room.
+  won't flood the speaker while dragging), and a **⋯ menu** for quick volume
+  levels, bass/treble/loudness/Night Sound controls, *Join*, and *Ungroup*.
+- **Favorites** — click the star in the header, then choose a Sonos Favorite and
+  the group that should play it. Favorites are read from the local Sonos system.
+- **Sleep timer** — use the moon button beside a group to stop it after 15, 30,
+  45, 60, or 90 minutes; the same menu can cancel the timer.
+- **Room presets** — use the gear menu to save or restore room grouping and
+  volume levels. Presets stay on this Mac.
 - **Footer** — **Party** groups every room into one; **Split** ungroups them all;
-  **⟳** (top-right) rescans; the **⚙︎** menu can enable **Start at Login**; the
-  power button quits.
+  **⟳** (top-right) rescans; the **⚙︎** menu also enables **Start at Login**;
+  the power button quits.
 
 ## Architecture
 
@@ -81,6 +87,7 @@ grant once.
 | `SonosDiscovery.swift` | SSDP `M-SEARCH` + subnet-scan fallback → player IPs. |
 | `SonosModels.swift` | `SonosZone` / `SonosGroup` models + SOAP service coordinates. |
 | `SoapClient.swift` | Builds/sends UPnP SOAP requests; pulls values from responses. |
+| `FavoritesParser.swift` | Reads Sonos Favorites from local ContentDirectory DIDL-Lite. |
 | `Topology.swift` | Parses `GetZoneGroupState` into the current groups. |
 | `SonosController.swift` | Discovery, topology, volume/mute/transport, now-playing, grouping, live polling. |
 | `ContentView.swift` | The grouped control panel UI (now-playing strip + volume/grouping). |

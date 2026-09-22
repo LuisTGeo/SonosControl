@@ -7,6 +7,8 @@ import SwiftUI
 @MainActor
 final class SonosController: ObservableObject {
     @Published private(set) var groups: [SonosGroup] = []
+    @Published private(set) var favorites: [SonosFavorite] = []
+    @Published private(set) var savedSetups: [SavedSetup] = []
     @Published private(set) var isLoading = false
     @Published private(set) var status: String?
 
@@ -18,6 +20,13 @@ final class SonosController: ObservableObject {
     }
 
     private var refreshTask: Task<Void, Never>?
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: "savedSonosSetups"),
+           let saved = try? JSONDecoder().decode([SavedSetup].self, from: data) {
+            savedSetups = saved
+        }
+    }
 
     // MARK: - Loading
 
@@ -78,6 +87,7 @@ final class SonosController: ObservableObject {
                 }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             status = groups.isEmpty ? "No rooms reported" : nil
+            await refreshFavorites(ip: ip)
             await refreshVolumes()
             await refreshPlayState()
             await refreshNowPlaying()
@@ -106,6 +116,35 @@ final class SonosController: ObservableObject {
             }
         }
         return nil
+    }
+
+    private func refreshFavorites(ip: String) async {
+        do {
+            let response = try await SoapClient.send(
+                ip: ip, service: SonosService.contentDirectory, action: "Browse",
+                arguments: [("ObjectID", "FV:2"), ("BrowseFlag", "BrowseDirectChildren"),
+                            ("Filter", "*"), ("StartingIndex", "0"),
+                            ("RequestedCount", "100"), ("SortCriteria", "")]
+            )
+            guard let result = SoapClient.value(of: "Result", in: response) else { return }
+            favorites = FavoritesParser.parse(SoapClient.unescape(result)).map { item in
+                let title = Self.xmlEscape(item.title)
+                let uri = Self.xmlEscape(item.uri)
+                let proto = Self.xmlEscape(item.protocolInfo.isEmpty ? "*:*:*:*" : item.protocolInfo)
+                let metadata = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"><item id=\"\(Self.xmlEscape(item.id))\" parentID=\"FV:2\" restricted=\"true\"><dc:title>\(title)</dc:title><upnp:class>object.item.sonos-favorite</upnp:class><res protocolInfo=\"\(proto)\">\(uri)</res></item></DIDL-Lite>"
+                return SonosFavorite(id: item.id, title: item.title, uri: item.uri, metadata: metadata)
+            }
+        } catch {
+            // Favorites may be unavailable on older players; playback stays usable.
+        }
+    }
+
+    private static func xmlEscape(_ value: String) -> String {
+        value.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 
     private func refreshVolumes() async {
@@ -208,6 +247,10 @@ final class SonosController: ObservableObject {
     func setGroupVolume(groupId: String, to volume: Int) {
         let clamped = min(max(volume, 0), 100)
         guard let coordinator = group(groupId)?.coordinator else { return }
+        if group(groupId)?.members.count == 1 {
+            setVolume(zoneId: coordinator.id, to: clamped)
+            return
+        }
         // Optimistically shift members toward the new level.
         let delta = clamped - (group(groupId)?.averageVolume ?? clamped)
         for member in group(groupId)?.members ?? [] {
@@ -219,6 +262,82 @@ final class SonosController: ObservableObject {
                 arguments: [("InstanceID", "0"), ("DesiredVolume", "\(clamped)")]
             )
             await refreshVolumes()
+        }
+    }
+
+    func playFavorite(_ favorite: SonosFavorite, in groupId: String) {
+        guard let coordinator = group(groupId)?.coordinator else { return }
+        Task {
+            do {
+                _ = try await SoapClient.send(
+                    ip: coordinator.ip, service: SonosService.avTransport, action: "SetAVTransportURI",
+                    arguments: [("InstanceID", "0"), ("CurrentURI", favorite.uri),
+                                ("CurrentURIMetaData", favorite.metadata)]
+                )
+                _ = try await SoapClient.send(
+                    ip: coordinator.ip, service: SonosService.avTransport, action: "Play",
+                    arguments: [("InstanceID", "0"), ("Speed", "1")]
+                )
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                await refreshPlayState()
+                await refreshNowPlaying()
+            } catch { status = "Couldn't play \(favorite.title)" }
+        }
+    }
+
+    func setSleepTimer(groupId: String, minutes: Int?) {
+        guard let coordinator = group(groupId)?.coordinator else { return }
+        let duration = minutes.map { String(format: "%02d:%02d:00", $0 / 60, $0 % 60) } ?? ""
+        Task {
+            do {
+                _ = try await SoapClient.send(
+                    ip: coordinator.ip, service: SonosService.avTransport, action: "ConfigureSleepTimer",
+                    arguments: [("InstanceID", "0"), ("NewSleepTimerDuration", duration)]
+                )
+                status = minutes.map { "Sleep timer set for \($0) min" } ?? "Sleep timer cancelled"
+            } catch { status = "Couldn't update sleep timer" }
+        }
+    }
+
+    func setBass(zoneId: String, to value: Int) {
+        setTone(zoneId: zoneId, action: "SetBass", field: "DesiredBass", value: value)
+    }
+
+    func setTreble(zoneId: String, to value: Int) {
+        setTone(zoneId: zoneId, action: "SetTreble", field: "DesiredTreble", value: value)
+    }
+
+    func setNightMode(zoneId: String, enabled: Bool) {
+        setTone(zoneId: zoneId, action: "SetEQ", field: "DesiredValue",
+                value: enabled ? 1 : 0, extra: ("EQType", "NightMode"))
+    }
+
+    func setLoudness(zoneId: String, enabled: Bool) {
+        guard let zone = zone(zoneId) else { return }
+        Task {
+            do {
+                _ = try await SoapClient.send(
+                    ip: zone.ip, service: SonosService.rendering, action: "SetLoudness",
+                    arguments: [("InstanceID", "0"), ("Channel", "Master"),
+                                ("DesiredLoudness", enabled ? "1" : "0")]
+                )
+            } catch { status = "Loudness isn't available on \(zone.name)" }
+        }
+    }
+
+    private func setTone(zoneId: String, action: String, field: String, value: Int,
+                         extra: (name: String, value: String)? = nil) {
+        guard let zone = zone(zoneId) else { return }
+        Task {
+            var arguments: [(name: String, value: String)] = [("InstanceID", "0")]
+            if let extra { arguments.append(extra) }
+            arguments.append((field, "\(min(max(value, -10), 10))"))
+            do {
+                _ = try await SoapClient.send(
+                    ip: zone.ip, service: SonosService.rendering, action: action,
+                    arguments: arguments
+                )
+            } catch { status = "Sound controls aren't available on \(zone.name)" }
         }
     }
 
@@ -331,6 +450,60 @@ final class SonosController: ObservableObject {
                 )
             }
             await load()
+        }
+    }
+
+    func saveSetup(named name: String) {
+        let setupGroups = groups.map { group in
+            SavedSetup.Group(coordinatorID: group.id,
+                rooms: group.members.map { SavedSetup.Room(id: $0.id, volume: $0.volume) })
+        }
+        guard !setupGroups.isEmpty else { return }
+        savedSetups.append(SavedSetup(name: name, groups: setupGroups))
+        persistSetups()
+    }
+
+    func deleteSetup(_ id: UUID) {
+        savedSetups.removeAll { $0.id == id }
+        persistSetups()
+    }
+
+    private func persistSetups() {
+        if let data = try? JSONEncoder().encode(savedSetups) {
+            UserDefaults.standard.set(data, forKey: "savedSonosSetups")
+        }
+    }
+
+    func applySetup(_ setup: SavedSetup) {
+        let currentRooms = groups.flatMap(\.members)
+        let knownIDs = Set(currentRooms.map(\.id))
+        let targetGroups = setup.groups.map {
+            SavedSetup.Group(coordinatorID: $0.coordinatorID, rooms: $0.rooms.filter { knownIDs.contains($0.id) })
+        }.filter { !$0.rooms.isEmpty }
+        guard !targetGroups.isEmpty else { status = "Preset rooms aren't available"; return }
+        Task {
+            for room in currentRooms where !room.isCoordinator {
+                _ = try? await SoapClient.send(ip: room.ip, service: SonosService.avTransport,
+                    action: "BecomeCoordinatorOfStandaloneGroup", arguments: [("InstanceID", "0")])
+            }
+            for target in targetGroups {
+                let leadRoom = target.rooms.first(where: { $0.id == target.coordinatorID }) ?? target.rooms[0]
+                guard let lead = currentRooms.first(where: { $0.id == leadRoom.id }) else { continue }
+                for room in target.rooms where room.id != leadRoom.id {
+                    guard let zone = currentRooms.first(where: { $0.id == room.id }) else { continue }
+                    _ = try? await SoapClient.send(ip: zone.ip, service: SonosService.avTransport,
+                        action: "SetAVTransportURI", arguments: [("InstanceID", "0"),
+                        ("CurrentURI", "x-rincon:\(lead.id)"), ("CurrentURIMetaData", "")])
+                }
+            }
+            for room in targetGroups.flatMap(\.rooms) {
+                guard let zone = currentRooms.first(where: { $0.id == room.id }) else { continue }
+                _ = try? await SoapClient.send(ip: zone.ip, service: SonosService.rendering,
+                    action: "SetVolume", arguments: [("InstanceID", "0"), ("Channel", "Master"),
+                    ("DesiredVolume", "\(room.volume)")])
+            }
+            await load()
+            status = "Restored \(setup.name)"
         }
     }
 
